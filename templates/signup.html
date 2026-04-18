@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Signup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Suit:wght@300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell">
+      <section class="auth-card auth-card-wide">
+        <a class="back-link" href="{{ url_for('login') }}">로그인으로</a>
+        <p class="eyebrow">Create Account</p>
+        <h1>Signup</h1>
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="flash-list">
+              {% for message in messages %}
+                <p class="flash-message">{{ message }}</p>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+        <form method="post" class="auth-form">
+          <input type="hidden" name="form_token" value="{{ form_token }}" />
+          <input type="text" name="name" placeholder="이름" value="{{ values.name if values else '' }}" required />
+          <input type="text" name="username" placeholder="아이디" value="{{ values.username if values else '' }}" required />
+          <input type="date" name="birthdate" value="{{ values.birthdate if values else '' }}" required />
+          <input type="email" name="email" placeholder="이메일" value="{{ values.email if values else '' }}" required />
+          <input type="password" name="password" placeholder="비밀번호" required />
+          <input type="password" name="confirm_password" placeholder="비밀번호 확인" required />
+          <input type="text" name="path" placeholder="가입하게 된 경로" value="{{ values.path if values else '' }}" required />
+          <div class="captcha-box">
+            <span class="captcha-label">Captcha</span>
+            <strong>{{ captcha }}</strong>
+          </div>
+          <input type="text" name="captcha" placeholder="Captcha 입력" value="{{ values.captcha if values else '' }}" required />
+          <button type="submit" class="primary-button">SIGN UP</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

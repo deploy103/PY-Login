@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Suit:wght@300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body class="landing-body">
+    <main class="admin-shell">
+      <section class="admin-header">
+        <div>
+          <p class="eyebrow">Admin Console</p>
+          <h1>{{ name }}</h1>
+          <p class="lead">사용자 관리와 활동 로그 확인 페이지입니다.</p>
+        </div>
+        <a class="secondary-link" href="{{ url_for('logout') }}">로그아웃</a>
+      </section>
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <div class="flash-list admin-flash">
+            {% for message in messages %}
+              <p class="flash-message">{{ message }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+      <section class="admin-grid">
+        <article class="admin-card">
+          <div class="admin-card-head">
+            <h2>Users</h2>
+            <span>{{ users|length }}명</span>
+          </div>
+          {% if users %}
+            <div class="user-list">
+              {% for user in users %}
+                <form method="post" action="{{ url_for('admin_delete_user') }}" class="user-row">
+                  <input type="hidden" name="form_token" value="{{ form_token }}" />
+                  <input type="hidden" name="username" value="{{ user.username }}" />
+                  <div>
+                    <strong>{{ user.name }}</strong>
+                    <p>{{ user.username }} / {{ user.email }}</p>
+                  </div>
+                  <button type="submit" class="danger-button">삭제</button>
+                </form>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="empty-state">현재 등록된 일반 사용자가 없습니다.</p>
+          {% endif %}
+        </article>
+        <article class="admin-card">
+          <div class="admin-card-head">
+            <h2>Activity Log</h2>
+            <span>{{ logs|length }}건</span>
+          </div>
+          {% if logs %}
+            <div class="log-list">
+              {% for log in logs %}
+                <p class="log-line">{{ log }}</p>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="empty-state">기록된 로그가 없습니다.</p>
+          {% endif %}
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
