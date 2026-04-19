@@ -2,6 +2,7 @@ import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
+import time
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,6 +40,17 @@ def ensure_storage():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 message TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip_address TEXT NOT NULL,
+                username TEXT,
+                reason TEXT NOT NULL,
+                created_at INTEGER NOT NULL
             )
             """
         )
@@ -157,8 +169,86 @@ def load_logs(limit=100):
     return [f"[{row['created_at']}] {row['message']}" for row in rows]
 
 
+def cleanup_old_auth_failures(window_seconds):
+    cutoff = int(time.time()) - int(window_seconds)
+    with closing(get_connection()) as connection:
+        connection.execute(
+            "DELETE FROM auth_failures WHERE created_at < ?",
+            (cutoff,),
+        )
+        connection.commit()
+
+
+def record_auth_failure(ip_address, username, reason):
+    now = int(time.time())
+    with closing(get_connection()) as connection:
+        connection.execute(
+            """
+            INSERT INTO auth_failures (ip_address, username, reason, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (ip_address, username or "", reason, now),
+        )
+        connection.commit()
+
+
+def count_recent_auth_failures(ip_address, window_seconds):
+    cleanup_old_auth_failures(window_seconds)
+    cutoff = int(time.time()) - int(window_seconds)
+    with closing(get_connection()) as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS failure_count
+            FROM auth_failures
+            WHERE ip_address = ? AND created_at >= ?
+            """,
+            (ip_address, cutoff),
+        ).fetchone()
+    return int(row["failure_count"]) if row else 0
+
+
+def count_recent_auth_failures_for_username(username, window_seconds):
+    cleanup_old_auth_failures(window_seconds)
+    normalized_username = (username or "").strip().lower()
+    if not normalized_username:
+        return 0
+    cutoff = int(time.time()) - int(window_seconds)
+    with closing(get_connection()) as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS failure_count
+            FROM auth_failures
+            WHERE lower(username) = ? AND created_at >= ?
+            """,
+            (normalized_username, cutoff),
+        ).fetchone()
+    return int(row["failure_count"]) if row else 0
+
+
+def clear_auth_failures(ip_address):
+    with closing(get_connection()) as connection:
+        connection.execute(
+            "DELETE FROM auth_failures WHERE ip_address = ?",
+            (ip_address,),
+        )
+        connection.commit()
+
+
+def clear_auth_failures_for_username(username):
+    normalized_username = (username or "").strip().lower()
+    if not normalized_username:
+        return
+    with closing(get_connection()) as connection:
+        connection.execute(
+            "DELETE FROM auth_failures WHERE lower(username) = ?",
+            (normalized_username,),
+        )
+        connection.commit()
+
+
 def reset_database():
     with closing(get_connection()) as connection:
         connection.execute("DELETE FROM users")
         connection.execute("DELETE FROM activity_logs")
+        connection.execute("DELETE FROM auth_failures")
         connection.commit()

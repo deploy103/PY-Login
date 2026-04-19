@@ -4,9 +4,21 @@ import sqlite3
 import secrets
 from urllib.parse import urlsplit
 from flask import Flask, flash, redirect, render_template, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 from services.auth_service import authenticate_user, create_user, validate_signup_form
 from services.captcha_service import generate_captcha
-from services.db_service import append_log, delete_user_by_username, ensure_storage, list_users, load_logs
+from services.db_service import (
+    append_log,
+    clear_auth_failures,
+    clear_auth_failures_for_username,
+    count_recent_auth_failures,
+    count_recent_auth_failures_for_username,
+    delete_user_by_username,
+    ensure_storage,
+    list_users,
+    load_logs,
+    record_auth_failure,
+)
 
 
 app = Flask(__name__)
@@ -16,12 +28,17 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "").lower() == "true"
 app.config["SESSION_COOKIE_NAME"] = "py_login_session"
 app.config["PREFERRED_URL_SCHEME"] = "https" if app.config["SESSION_COOKIE_SECURE"] else "http"
+app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
 MAX_AUTH_FAILURES = 5
+MAX_IP_AUTH_FAILURES = 10
+MAX_USERNAME_AUTH_FAILURES = 7
+IP_AUTH_WINDOW_SECONDS = 900
 TRUSTED_HOSTS = {
     host.strip().lower()
     for host in os.environ.get("TRUSTED_HOSTS", "localhost,127.0.0.1,10.0.0.101").split(",")
     if host.strip()
 }
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 
 ensure_storage()
@@ -79,9 +96,38 @@ def reset_auth_failures():
     session["auth_failures"] = 0
 
 
+def get_client_ip():
+    return request.remote_addr or "unknown"
+
+
+def is_ip_rate_limited(ip_address):
+    return count_recent_auth_failures(ip_address, IP_AUTH_WINDOW_SECONDS) >= MAX_IP_AUTH_FAILURES
+
+
+def is_username_rate_limited(username):
+    return count_recent_auth_failures_for_username(username, IP_AUTH_WINDOW_SECONDS) >= MAX_USERNAME_AUTH_FAILURES
+
+
 def handle_auth_failure(message, username=""):
     failures = increase_auth_failures()
-    append_log(f"LOGIN_FAIL username={username or 'unknown'} reason={message} count={failures}")
+    ip_address = get_client_ip()
+    record_auth_failure(ip_address, username, message)
+    ip_failures = count_recent_auth_failures(ip_address, IP_AUTH_WINDOW_SECONDS)
+    username_failures = count_recent_auth_failures_for_username(username, IP_AUTH_WINDOW_SECONDS)
+    append_log(
+        f"LOGIN_FAIL username={username or 'unknown'} ip={ip_address} "
+        f"reason={message} session_count={failures} ip_count={ip_failures} username_count={username_failures}"
+    )
+    if username_failures >= MAX_USERNAME_AUTH_FAILURES:
+        for key in ["auth_failures", "login_captcha", "login_form_token"]:
+            session.pop(key, None)
+        flash("해당 아이디의 로그인 실패가 너무 많아 잠시 차단되었습니다. 잠시 후 다시 시도해 주세요.")
+        return redirect(url_for("login"))
+    if ip_failures >= MAX_IP_AUTH_FAILURES:
+        for key in ["auth_failures", "login_captcha", "login_form_token"]:
+            session.pop(key, None)
+        flash("현재 IP에서 로그인 실패가 너무 많아 잠시 차단되었습니다. 잠시 후 다시 시도해 주세요.")
+        return redirect(url_for("login"))
     if failures >= MAX_AUTH_FAILURES:
         for key in ["auth_failures", "login_captcha", "login_form_token"]:
             session.pop(key, None)
@@ -109,6 +155,9 @@ def login():
         reset_auth_failures()
 
     if request.method == "GET":
+        if is_ip_rate_limited(get_client_ip()):
+            flash("현재 IP에서 로그인 실패가 너무 많아 잠시 차단되었습니다. 잠시 후 다시 시도해 주세요.")
+            return render_template("login.html", captcha="잠시 후 재시도", form_token=get_form_token("login"))
         reset_login_captcha()
         set_form_token("login")
         return render_template(
@@ -122,6 +171,15 @@ def login():
     captcha_input = request.form.get("captcha", "").strip()
     expected_captcha = session.get("login_captcha", "")
     form_token = request.form.get("form_token", "")
+    ip_address = get_client_ip()
+
+    if is_username_rate_limited(username):
+        flash("해당 아이디의 로그인 실패가 너무 많아 잠시 차단되었습니다. 잠시 후 다시 시도해 주세요.")
+        return redirect(url_for("login"))
+
+    if is_ip_rate_limited(ip_address):
+        flash("현재 IP에서 로그인 실패가 너무 많아 잠시 차단되었습니다. 잠시 후 다시 시도해 주세요.")
+        return redirect(url_for("login"))
 
     if not is_valid_form_token("login", form_token):
         reset_login_captcha()
@@ -146,10 +204,15 @@ def login():
 
     session.clear()
     reset_auth_failures()
+    clear_auth_failures(ip_address)
+    clear_auth_failures_for_username(user["username"])
     session["username"] = user["username"]
     session["user_name"] = user["name"]
     session["is_admin"] = user.get("role") == "admin"
-    append_log(f"LOGIN_SUCCESS username={user['username']} role={'admin' if session['is_admin'] else 'user'}")
+    append_log(
+        f"LOGIN_SUCCESS username={user['username']} ip={ip_address} "
+        f"role={'admin' if session['is_admin'] else 'user'}"
+    )
     if session["is_admin"]:
         return redirect(url_for("admin_dashboard"))
     return redirect(url_for("secret"))
@@ -310,6 +373,8 @@ def set_security_headers(response):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     response.headers["Cache-Control"] = "no-store"
+    if request.is_secure:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; "
