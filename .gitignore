@@ -2,5 +2,11 @@
 __pycache__/
 *.pyc
 node_modules/
-data/app.db
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+.env
+.env.*
+!.env.example
 구상/
