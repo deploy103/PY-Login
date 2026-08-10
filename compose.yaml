@@ -1,0 +1,36 @@
+services:
+  py-login:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SECRET_KEY: "${SECRET_KEY:?SECRET_KEY must be set in .env}"
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-true}"
+      TRUSTED_HOSTS: "${TRUSTED_HOSTS:-localhost,127.0.0.1,py-login}"
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - py-login-data:/app/data
+    networks:
+      - mvtp-web-net
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  py-login-data:
+    name: py-login-data
+
+networks:
+  mvtp-web-net:
+    external: true
