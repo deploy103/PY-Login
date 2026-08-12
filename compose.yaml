@@ -10,8 +10,8 @@ services:
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
       SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-true}"
       TRUSTED_HOSTS: "${TRUSTED_HOSTS:-localhost,127.0.0.1,py-login}"
-    ports:
-      - "127.0.0.1:8000:8000"
+    expose:
+      - "8000"
     volumes:
       - py-login-data:/app/data
     networks:
